@@ -1,0 +1,124 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Legacy CSS — Dark neon theme classes used by /old and /retro routes.
+   Preserved for backwards compatibility.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.hero-bg {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(0, 255, 136, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
+}
+
+.glow-card {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(180deg, rgba(20, 25, 38, 0.94) 0%, rgba(16, 19, 26, 0.94) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.glow-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(120deg, transparent 25%, rgba(0, 255, 136, 0.35), rgba(0, 212, 255, 0.2), transparent 75%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.glow-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.glow-card:hover::before {
+  opacity: 1;
+}
+
+.glow-card:hover {
+  border-color: rgba(0, 255, 136, 0.22);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 54px rgba(0, 255, 136, 0.1);
+}
+
+@keyframes badge-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+}
+
+.badge-pulse {
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.26);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(0, 255, 136, 0.5);
+  }
+}
+
+.pulse-active {
+  animation: pulse-glow 2.6s ease-in-out infinite;
+}
+
+@keyframes progress-shine {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.progress-bar-shine {
+  position: relative;
+}
+
+.progress-bar-shine::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: progress-shine 2.4s ease-in-out infinite;
+}
+
+.glass-nav {
+  background: rgba(10, 12, 19, 0.86);
+  backdrop-filter: blur(16px);
+}
+
+.gradient-text-legacy {
+  background: linear-gradient(135deg, #00ff88, #00d4ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-purple {
+  background: linear-gradient(135deg, #00d4ff, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

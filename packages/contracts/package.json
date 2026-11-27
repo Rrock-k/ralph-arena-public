@@ -1,0 +1,23 @@
+{
+  "name": "@arena/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "export:accepted-spec-schema": "npm run build && node ../../scripts/export-accepted-spec-artifact-schema.mjs",
+    "test": "vitest run --root src"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "fast-check": "^4.6.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.8"
+  }
+}

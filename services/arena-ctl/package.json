@@ -1,0 +1,31 @@
+{
+  "name": "@arena/arena-ctl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "precli": "npm run build --silent",
+    "cli": "node dist/cli.js",
+    "dev": "tsx watch src/index.ts",
+    "start": "bash start.sh"
+  },
+  "dependencies": {
+    "@arena/contracts": "file:../../packages/contracts",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.3.6"
+  },
+  "overrides": {
+    "@hono/node-server": "1.19.14",
+    "express-rate-limit": "8.5.2",
+    "fast-uri": "3.1.2",
+    "hono": "4.12.23",
+    "ip-address": "10.2.0",
+    "qs": "6.15.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  }
+}

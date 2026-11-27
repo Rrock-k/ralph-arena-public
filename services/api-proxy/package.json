@@ -1,0 +1,19 @@
+{
+  "name": "@agents-arena/api-proxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run src/__tests__"
+  },
+  "dependencies": {
+    "@arena/contracts": "file:../../packages/contracts",
+    "dotenv": "^17.2.4",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

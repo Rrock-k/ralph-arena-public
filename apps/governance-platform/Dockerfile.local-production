@@ -1,0 +1,74 @@
+FROM node:20-slim AS base
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN set -eux; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends ca-certificates gnupg wget; \
+  install -d /usr/share/postgresql-common/pgdg; \
+  wget -qO /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
+  echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends postgresql-client-17; \
+  rm -rf /var/lib/apt/lists/*
+
+WORKDIR /repo
+
+FROM base AS deps
+
+COPY packages/contracts/package.json packages/contracts/package-lock.json ./packages/contracts/
+RUN npm --prefix packages/contracts ci
+COPY packages/contracts ./packages/contracts
+RUN npm --prefix packages/contracts run build
+
+COPY packages/loops/ralph-runtime/package.json packages/loops/ralph-runtime/package-lock.json ./packages/loops/ralph-runtime/
+RUN npm --prefix packages/loops/ralph-runtime ci
+COPY packages/loops/ralph-runtime ./packages/loops/ralph-runtime
+
+COPY apps/governance-platform ./apps/governance-platform
+RUN npm --prefix apps/governance-platform ci --include=dev
+
+FROM deps AS builder
+
+COPY package.json package-lock.json ./
+WORKDIR /repo/apps/governance-platform
+ENV NODE_ENV=production
+RUN npm run build
+
+FROM base AS runner
+
+ARG GOVERNANCE_SOURCE_SHA=unknown
+LABEL org.opencontainers.image.revision=$GOVERNANCE_SOURCE_SHA
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/public ./public
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/public ./apps/governance-platform/public
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/.next/static ./apps/governance-platform/.next/static
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=nextjs:nodejs /repo/apps/governance-platform/node_modules/@prisma ./node_modules/@prisma
+
+RUN rm -rf ./public/short-html ./apps/governance-platform/public/short-html
+
+RUN mkdir -p /app/deployments \
+  && chown nextjs:nodejs /app/deployments
+
+COPY --chown=nextjs:nodejs apps/governance-platform/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+USER nextjs
+
+EXPOSE 3000
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

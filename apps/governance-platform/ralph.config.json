@@ -1,0 +1,18 @@
+{
+  "agent": "claude-code",
+  "model": "sonnet",
+  "verificationLevel": "standard",
+  "maxRetries": 5,
+  "maxDeployRetries": 2,
+  "skipDeployOnFailure": true,
+  "completionPromise": "TASK_COMPLETE",
+  "autoCommit": true,
+  "autoPush": false,
+  "verbose": true,
+  "controller": {
+    "enabled": true,
+    "runAfterPhase": true,
+    "runAfterNTasks": 5,
+    "runOnConsecutiveFailures": 3
+  }
+}

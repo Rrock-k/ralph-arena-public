@@ -1,0 +1,22 @@
+{
+  "name": "@arena/runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "compliance": "tsx src/compliance/run.ts",
+    "test": "npm run build && vitest run src/auth-retry.test.ts && node --import tsx --test src/resource-forensics.test.ts src/assets.test.ts && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@arena/contracts": "file:../../packages/contracts",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

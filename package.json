@@ -1,0 +1,32 @@
+{
+  "name": "agents-arena",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix apps/governance-platform run dev",
+    "docker:up": "bash scripts/docker-local-stack.sh up -d --build",
+    "docker:up:external-db": "bash scripts/docker-local-stack.sh up -d --build --no-deps governance-platform authd api-proxy worker-agent task-board caddy",
+    "docker:up:fg": "bash scripts/docker-local-stack.sh up --build",
+    "docker:down": "bash scripts/docker-local-stack.sh down",
+    "docker:logs": "bash scripts/docker-local-stack.sh logs -f --tail=100",
+    "backlog:check": "node scripts/check-backlog-format.mjs",
+    "env:check": "node scripts/check-env-contract.mjs",
+    "governance:preflight": "node scripts/governance-rollout-preflight.mjs --static --expect-block",
+    "build": "npm --prefix apps/governance-platform run build",
+    "build:runner": "npm --prefix services/arena-runner run build",
+    "build:worker-agent": "npm --prefix services/worker-agent run build",
+    "build:services": "npm --prefix services/arena-runner run build && npm --prefix services/worker-agent run build",
+    "start": "bash scripts/start.sh",
+    "test": "npm --prefix apps/governance-platform run test",
+    "proxy": "bash -lc 'set -a; source apps/governance-platform/.env; [ -f apps/governance-platform/.env.local ] && source apps/governance-platform/.env.local; set +a; npm --prefix services/api-proxy run start'",
+    "tasks": "cd apps/task-board && PORT=${PORT:-3001} npx next dev --port ${PORT:-3001}",
+    "build:board": "cd apps/task-board && npx next build",
+    "a2e:studio": "cd apps/a2e-studio && PORT=${PORT:-3003} npx next dev --port ${PORT:-3003}",
+    "build:a2e:studio": "cd apps/a2e-studio && npx next build",
+    "architecture:lab": "npm --prefix apps/architecture-lab run dev",
+    "build:architecture-lab": "npm --prefix apps/architecture-lab run build",
+    "storybook": "npm --prefix apps/governance-platform run storybook",
+    "test:ui:e2e:db:up": "docker compose -f docker-compose.local.yml up -d postgres-e2e",
+    "test:ui:e2e:db:down": "docker compose -f docker-compose.local.yml stop postgres-e2e",
+    "test:ui:e2e:budget": "bash -lc 'PLAYWRIGHT_BASE_URL=${PLAYWRIGHT_BASE_URL:-http://localhost:3010} PORT=${PORT:-3010} PLAYWRIGHT_DATABASE_URL=${PLAYWRIGHT_DATABASE_URL:-postgresql://ralph:ralph@localhost:5434/ralph_arena_e2e} npm --prefix apps/governance-platform run test:e2e:budget'"
+  }
+}

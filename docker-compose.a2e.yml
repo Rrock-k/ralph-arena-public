@@ -1,0 +1,192 @@
+# Isolated test environment for A2E runs.
+# Spun up alongside the main stack; A2E agent (managed by main governance)
+# connects to this network to run Playwright tests against it.
+#
+# Key: A2E_CODE_PATH controls where governance reads source code from.
+# Initially = ARENA_HOST_PATH (main repo). After agent workspace is ready,
+# run-a2e.sh restarts governance with A2E_CODE_PATH = agent's workspace.
+# This means agent's code fixes are hot-reloaded into test governance!
+#
+# Usage:
+#   ARENA_HOST_PATH="$(pwd)" docker compose -p agents-arena-a2e -f docker-compose.a2e.yml up -d
+#   docker compose -p agents-arena-a2e -f docker-compose.a2e.yml down -v
+
+services:
+  postgres-test:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ralph
+      POSTGRES_PASSWORD: ralph
+      POSTGRES_DB: ralph_arena_a2e
+    ports:
+      - "5435:5432"
+    volumes:
+      - pgdata_a2e:/var/lib/postgresql/data
+    networks:
+      - arena-a2e-network
+
+  governance-platform-test:
+    image: node:20-slim
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - postgres-test
+    environment:
+      NODE_ENV: development
+      HOSTNAME: "0.0.0.0"
+      PORT: "3005"
+      AUTH_TRUST_HOST: "true"
+      NEXTAUTH_URL: "http://governance-platform-test:3005"
+      AUTH_URL: "http://governance-platform-test:3005"
+      GOVERNANCE_INTERNAL_URL: "http://governance-platform-test:3005"
+      CRON_SECRET: "a2e-cron-secret"
+      PLAYWRIGHT_TEST: "1"
+      DATABASE_URL: "postgresql://ralph:ralph@postgres-test:5432/ralph_arena_a2e"
+      SECRETS_ENCRYPTION_KEY: "${SECRETS_ENCRYPTION_KEY:-a2e-test-key-00000000000000000000}"
+      RUNNER_WEBHOOK_SECRET: "a2e-test-webhook-secret"
+      WORKER_SECRET: "a2e-test-webhook-secret"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      WORKER_AGENT_URL: "http://worker-agent-test:4205"
+      API_PROXY_URL: "http://api-proxy-test:4105"
+      PREVIEW_DOMAIN: "a2e.local"
+      CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+      CLAUDE_CODE_OAUTH_REFRESH_TOKEN: "${CLAUDE_CODE_OAUTH_REFRESH_TOKEN:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      CODEX_AUTH_JSON: "${CODEX_AUTH_JSON:-}"
+      APP_PORT: "3005"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Build @arena/contracts FIRST (governance depends on it via file: reference;
+        # NODE_ENV=development so typescript devDep is installed for tsc)
+        if [ -f packages/contracts/package.json ]; then
+          NODE_ENV=development npm --prefix packages/contracts install
+          npm --prefix packages/contracts run build
+          echo '[a2e] @arena/contracts built'
+        fi
+
+        # Install governance deps (named volume starts empty; --ignore-scripts to avoid
+        # postinstall prisma generate failing before dotenv is linked;
+        # NODE_ENV=development to include devDeps like dotenv needed by prisma.config.ts)
+        echo '[a2e] Installing governance deps...'
+        NODE_ENV=development npm --prefix apps/governance-platform install --ignore-scripts
+        echo '[a2e] Governance deps installed'
+
+        # Prisma generate + push schema (subshell to preserve cwd)
+        (cd apps/governance-platform && npx prisma generate && npx prisma db push --accept-data-loss) || echo '[a2e] WARNING: prisma setup failed'
+
+        # Seed reference data (loops, tools, feature flags)
+        (cd apps/governance-platform && node -e '
+          const { Client } = require("pg");
+          const fs = require("fs");
+          const f = "prisma/a2e-seed.sql";
+          if (!fs.existsSync(f)) { console.log("[a2e] No seed file, skipping"); process.exit(0); }
+          const c = new Client(process.env.DATABASE_URL);
+          c.connect()
+            .then(() => c.query(fs.readFileSync(f,"utf8")))
+            .then(() => { console.log("[a2e] Seed data applied"); return c.end(); })
+            .catch(e => { console.log("[a2e] Seed note:", e.message); c.end(); });
+        ') || true
+
+        # Background: watch schema.prisma for changes → auto prisma generate + db push
+        (
+          SCHEMA=apps/governance-platform/prisma/schema.prisma
+          LAST_HASH=$$(md5sum $$SCHEMA 2>/dev/null | cut -d' ' -f1)
+          while true; do
+            sleep 5
+            CURR_HASH=$$(md5sum $$SCHEMA 2>/dev/null | cut -d' ' -f1)
+            if [ -n "$$LAST_HASH" ] && [ "$$CURR_HASH" != "$$LAST_HASH" ]; then
+              echo '[a2e-watcher] schema.prisma changed — regenerating Prisma client + pushing schema...'
+              (cd apps/governance-platform && npx prisma generate && npx prisma db push --accept-data-loss) || echo '[a2e-watcher] WARNING: prisma update failed'
+              echo '[a2e-watcher] Prisma update done.'
+            fi
+            LAST_HASH=$$CURR_HASH
+          done
+        ) &
+
+        npm --prefix apps/governance-platform run dev
+    volumes:
+      # Source code — switches to agent workspace after run-a2e.sh Step 6
+      - "${A2E_CODE_PATH:-${ARENA_HOST_PATH}}:/app"
+      # Auth tokens — always from main repo so getFreshEnv() works after workspace switch
+      - "${ARENA_HOST_PATH}/.env.local:/app/.env.local:ro"
+      # Persistent deps — survive code path switches
+      - governance_node_modules_a2e:/app/apps/governance-platform/node_modules
+      # .next cache — NOT a named volume, ephemeral per container lifecycle
+      # This avoids stale cache issues when code path switches
+    ports:
+      - "3005:3005"
+    networks:
+      - arena-a2e-network
+
+  api-proxy-test:
+    image: node:20-slim
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - postgres-test
+    environment:
+      DATABASE_URL: "postgresql://ralph:ralph@postgres-test:5432/ralph_arena_a2e"
+      API_PROXY_PORT: "4105"
+      API_PROXY_SECRET: "a2e-test-api-proxy-secret"
+    command: >
+      sh -lc "
+        [ -x services/api-proxy/node_modules/.bin/tsx ] || npm --prefix services/api-proxy ci;
+        npm --prefix services/api-proxy run start
+      "
+    volumes:
+      - "${A2E_CODE_PATH:-${ARENA_HOST_PATH}}:/app"
+      - api_proxy_node_modules_a2e:/app/services/api-proxy/node_modules
+    ports:
+      - "4105:4105"
+    networks:
+      - arena-a2e-network
+
+  worker-agent-test:
+    image: node:20-slim
+    # Worker-agent always runs from main repo (needs ARENA_HOST_PATH for docker + workspaces)
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    depends_on:
+      - governance-platform-test
+    environment:
+      GOVERNANCE_URL: "http://governance-platform-test:3005"
+      WORKER_SECRET: "a2e-test-webhook-secret"
+      HOST_ID: "local"
+      POLL_INTERVAL_MS: "2000"
+      WORKER_PORT: "4205"
+      RUNNER_MAX_CONCURRENT_RUNS: "10"
+      WORKER_IMAGE: "arena-public-worker:local"
+      ARENA_DEV_MODE: "true"
+      ARENA_HOST_PATH: "${ARENA_HOST_PATH}"
+      ARENA_PROJECT_WORKSPACES_ROOT: "${ARENA_HOST_PATH}/runtime/a2e-test-workspaces"
+      ARENA_PROJECT_DATA_ROOT: "${ARENA_HOST_PATH}/runtime/a2e-test-data"
+      RALEPH_HOST_PATH: "${RALEPH_HOST_PATH:-}"
+      SYMPHO_HOST_PATH: "${SYMPHO_HOST_PATH:-}"
+      ARENA_NETWORK: "arena-a2e-network"
+      PREVIEW_DOMAIN: "a2e.local"
+    command: >
+      sh -lc "
+        [ -x services/worker-agent/node_modules/.bin/tsx ] || npm --prefix services/worker-agent ci;
+        npm --prefix services/worker-agent run start
+      "
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+      - worker_agent_node_modules_a2e:${ARENA_HOST_PATH}/services/worker-agent/node_modules
+    ports:
+      - "4205:4205"
+    networks:
+      - arena-a2e-network
+
+volumes:
+  pgdata_a2e:
+  governance_node_modules_a2e:
+  api_proxy_node_modules_a2e:
+  worker_agent_node_modules_a2e:
+
+networks:
+  arena-a2e-network:
+    name: arena-a2e-network

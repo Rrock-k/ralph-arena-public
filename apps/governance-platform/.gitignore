@@ -1,0 +1,62 @@
+# Ralph
+.arena/*
+!.arena/plan.json
+!.arena/ralph-progress.json
+!.arena/decisions-log.json
+!.arena/ralph-features.json
+
+# Logs
+*.log
+logs/
+!src/app/api/**/logs/
+!src/app/**/admin/logs/
+
+# OS
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+.next/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Temp
+*.tmp
+*.temp
+.tmp/
+.cache/
+
+# Prisma
+/src/generated/prisma
+*.db
+*.db-journal
+
+# ── ralph: auto-managed (do not edit below) ──
+# Detected stack: Next.js, Prisma, Docker, TypeScript, Test runner, Playwright
+Thumbs.db
+prisma/*.db
+prisma/*.db-journal
+.docker-data/
+test-results/
+playwright-report/
+playwright/.cache/
+# ── ralph: end auto-managed ──
+
+*storybook.log
+storybook-static
+
+# Sentry Config File
+.env.sentry-build-plugin

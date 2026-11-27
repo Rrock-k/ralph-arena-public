@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ralph
+      POSTGRES_PASSWORD: ralph
+      POSTGRES_DB: ralph_arena
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      - postgres
+    environment:
+      - NODE_ENV=production
+      - AUTH_TRUST_HOST=true
+      - AUTH_URL=${AUTH_URL:-http://localhost:3000}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - DATABASE_URL=postgresql://ralph:ralph@postgres:5432/ralph_arena
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-default-secret-for-local-dev}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-admin@example.com}
+
+volumes:
+  pgdata:

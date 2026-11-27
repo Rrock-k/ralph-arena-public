@@ -1,0 +1,49 @@
+FROM node:24-bookworm
+
+ARG OPENCLAW_CLI_VERSION=2026.5.28
+
+ENV ARENA_OPENCLAW_CLI_VERSION="${OPENCLAW_CLI_VERSION}"
+
+# Minimal runtime for service-like OpenClaw projects.
+# Keep it close to upstream OpenClaw container assumptions and avoid pulling in
+# Ralph/Playwright/extra agent CLIs that inflate memory use.
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    ca-certificates \
+    procps \
+    hostname \
+    openssl \
+    build-essential \
+    python3 \
+    python-is-python3 \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g "openclaw@${OPENCLAW_CLI_VERSION}"
+
+RUN echo "node ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/node && \
+    chmod 0440 /etc/sudoers.d/node
+
+# Build shared contracts (used by arena-runner)
+COPY packages/contracts/package.json packages/contracts/package-lock.json /tmp/contracts/
+RUN cd /tmp/contracts && npm ci
+COPY packages/contracts/tsconfig.json /tmp/contracts/
+COPY packages/contracts/src/ /tmp/contracts/src/
+RUN cd /tmp/contracts && npx tsc
+
+# Bundle prebuilt arena-runner dist from the local repo.
+COPY services/arena-runner/dist/ /arena/
+RUN mkdir -p /arena/node_modules/@arena/contracts && \
+    cp -r /tmp/contracts/dist/ /arena/node_modules/@arena/contracts/dist/ && \
+    cp /tmp/contracts/package.json /arena/node_modules/@arena/contracts/package.json && \
+    cp -r /tmp/contracts/node_modules/zod /arena/node_modules/zod
+
+WORKDIR /app
+COPY services/arena-runner/placeholder-server.cjs /app/placeholder-server.cjs
+
+RUN mkdir -p /workspace && chown node:node /workspace
+
+USER node
+
+CMD ["node", "/arena/index.js"]

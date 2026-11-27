@@ -1,0 +1,14 @@
+tunnel: 00000000-0000-4000-8000-000000000000
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: app.arena.example.test
+    service: http://caddy:8080
+    originRequest:
+      httpHostHeader: app.arena.example.test
+      disableChunkedEncoding: false
+  - hostname: tg.arena.example.test
+    service: http://caddy:8080
+  - hostname: "*.arena.example.test"
+    service: http://caddy:8080
+  - service: http_status:404

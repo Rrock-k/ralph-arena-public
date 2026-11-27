@@ -1,0 +1,242 @@
+{
+	auto_https off
+}
+
+(preview_no_store) {
+	header_down Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+	header_down CDN-Cache-Control "no-store"
+	header_down Cloudflare-CDN-Cache-Control "no-store"
+	header_down Pragma "no-cache"
+	header_down Expires "0"
+}
+
+(preview_response_no_store) {
+	header Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+	header CDN-Cache-Control "no-store"
+	header Cloudflare-CDN-Cache-Control "no-store"
+	header Pragma "no-cache"
+	header Expires "0"
+}
+
+# Main governance app (public ingress goes through this block)
+http://localhost:8080, http://app.arena.example.test:8080 {
+	@admin_ctl path /api/admin/ctl /api/admin/ctl/*
+
+	handle @admin_ctl {
+		respond "Not found" 404
+	}
+
+	@shortHtmlHidden path_regexp shortHtmlHidden ^/short-html/(?:.*/)?\.[^/]+(?:/.*)?$
+	handle @shortHtmlHidden {
+		respond "Not found" 404
+	}
+
+	handle_path /short-html/* {
+		root * /srv/short-html
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	# RA-220: Override immutable cache headers for dev-mode static chunks.
+	# Next.js Turbopack sets max-age=31536000 on chunks without content hashes,
+	# which causes Cloudflare edge to cache stale JS indefinitely.
+	@nextStatic path /_next/static/*
+	handle @nextStatic {
+		reverse_proxy {
+			dynamic a governance-platform 3000
+			header_down Cache-Control "public, max-age=0, must-revalidate, no-transform"
+			flush_interval -1
+		}
+	}
+
+	@telegramWebAppAuth path /api/telegram/webapp-session /api/telegram/webapp-link
+	handle @telegramWebAppAuth {
+		reverse_proxy {
+			dynamic a governance-platform 3000
+			header_down Cache-Control "no-cache, no-store, must-revalidate"
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy {
+			# Re-resolve DNS on each request so container IP changes after restart
+			dynamic a governance-platform 3000
+			# Disable response buffering — stream chunks immediately.
+			# Required for React 19 streaming SSR hydration through CF tunnel.
+			flush_interval -1
+			# RA-223: Prevent stale HTML pages in browser cache.
+			# no-cache = always revalidate with server (304 if unchanged, fast).
+			# Only applies to HTML; _next/static/* is handled above with its own policy.
+			header_down Cache-Control "no-cache"
+		}
+	}
+
+	handle_errors {
+		@maintenance expression `{err.status_code} in [502, 503, 504]`
+		handle @maintenance {
+			header Content-Type "text/html; charset=utf-8"
+			header Cache-Control "no-cache"
+			respond `<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=refresh content=5><title>Ralph Arena — Updating</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0f19;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}.card{text-align:center;padding:40px 32px;max-width:400px}.logo{font-size:24px;font-weight:700;letter-spacing:-.5px;margin-bottom:32px;color:#fff}.logo span{color:#10b981}.spinner{width:32px;height:32px;border:3px solid #1e293b;border-top-color:#10b981;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 24px}@keyframes spin{to{transform:rotate(360deg)}}h1{font-size:18px;font-weight:600;margin-bottom:8px}p{font-size:13px;color:#94a3b8;line-height:1.6}</style></head><body><div class=card><div class=logo>Ralph <span>Arena</span></div><div class=spinner></div><h1>Updating</h1><p>The app is restarting. This page will refresh automatically.</p></div></body></html>` 200
+		}
+	}
+}
+
+# Preview subdomains created by worker-agent:
+# preview-<label>.localhost:8080 -> preview-<label>:3000
+http://*.localhost:8080 {
+	import preview_response_no_store
+
+	# Strip iframe-blocking headers so governance can embed previews.
+	header -X-Frame-Options
+	header -Content-Security-Policy
+
+	# RA-210/RA-366: Strip spoofed identity/access headers — only preview-gate-issued anon/project headers
+	request_header -X-Ralph-User-Id
+	request_header -X-Ralph-User-Email
+	request_header -X-Ralph-User-Role
+	request_header -X-Ralph-Anon-Id
+	request_header -X-Arena-Project-Id
+	request_header -X-Arena-Project-Role
+	request_header -X-Arena-Project-Capabilities
+
+	@preview_websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+
+	handle @preview_websocket {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.1}:3000
+	}
+
+	handle /sw.js {
+		# RA-263: serve a runner-owned wrapper whose bytes change with git HEAD.
+		# This lets real project service workers update when preview code changes.
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.1}:3999 {
+			import preview_no_store
+		}
+	}
+
+	handle /__arena/preview-generation {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.1}:3999 {
+			import preview_no_store
+		}
+	}
+
+	handle /__arena/project-sw.js {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		rewrite * /sw.js
+		reverse_proxy {labels.1}:3000 {
+			import preview_no_store
+		}
+	}
+
+	handle {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.1}:3000 {
+			import preview_no_store
+		}
+	}
+}
+
+# RA-206: Previews via Cloudflare tunnel (HTTPS terminated by CF, arrives as HTTP)
+# preview-<label>.arena.example.test -> preview-<label>:3000
+http://*.arena.example.test:8080 {
+	import preview_response_no_store
+
+	header -X-Frame-Options
+	header -Content-Security-Policy
+
+	request_header -X-Ralph-User-Id
+	request_header -X-Ralph-User-Email
+	request_header -X-Ralph-User-Role
+	request_header -X-Ralph-Anon-Id
+	request_header -X-Arena-Project-Id
+	request_header -X-Arena-Project-Role
+	request_header -X-Arena-Project-Capabilities
+
+	@preview_websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+
+	handle @preview_websocket {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.2}:3000
+	}
+
+	handle /sw.js {
+		# RA-263: serve a runner-owned wrapper whose bytes change with git HEAD.
+		# This lets real project service workers update when preview code changes.
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.2}:3999 {
+			import preview_no_store
+		}
+	}
+
+	handle /__arena/preview-generation {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.2}:3999 {
+			import preview_no_store
+		}
+	}
+
+	handle /__arena/project-sw.js {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		rewrite * /sw.js
+		reverse_proxy {labels.2}:3000 {
+			import preview_no_store
+		}
+	}
+
+	handle {
+		forward_auth governance-platform:3000 {
+			uri /api/auth/preview-gate?host={host}
+			copy_headers X-Ralph-Anon-Id X-Arena-Project-Id X-Arena-Project-Role X-Arena-Project-Capabilities
+		}
+
+		reverse_proxy {labels.2}:3000 {
+			import preview_no_store
+		}
+	}
+}
+

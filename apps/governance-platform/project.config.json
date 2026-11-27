@@ -1,0 +1,22 @@
+{
+  "name": "ralph-arena",
+  "description": "Ralph Arena — community-driven AI development platform for project proposals and voting.",
+  "techStack": {
+    "language": "typescript",
+    "framework": "node"
+  },
+  "repository": {
+    "url": "",
+    "branch": "main",
+    "deployBranch": "main"
+  },
+  "deploy": {
+    "enabled": true,
+    "waitForDeploy": true,
+    "timeoutMinutes": 10,
+    "localDocker": {
+      "enabled": true,
+      "composeFile": "docker-compose.yml"
+    }
+  }
+}

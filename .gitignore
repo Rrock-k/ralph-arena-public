@@ -1,0 +1,45 @@
+runtime/
+runtime-backup-pre-ra-237/
+*.code-workspace
+**/.runner-work/
+**/.next/
+**/node_modules/
+infra/vps/provision.env
+infra/vps/.keys/
+*.db
+
+**/tsconfig.tsbuildinfo
+.env.local
+.env
+.claude/worktrees/
+.claude/settings.local.json
+.antigravitycli/
+debug/backups/
+work/experiments/
+
+# ── ralph: auto-managed (do not edit below) ──
+# Detected stack: generic
+node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.env.*
+!.env.example
+.arena/*
+!.arena/progress.json
+!.arena/plan.json
+!.arena/ralph-progress.json
+!.arena/decisions-log.json
+!.arena/ralph-features.json
+dist/
+build/
+out/
+coverage/
+logs/
+*.log
+.cache/
+.tmp/
+.DS_Store
+Thumbs.db
+# ── ralph: end auto-managed ──
+backup-pre-ra-237.sql

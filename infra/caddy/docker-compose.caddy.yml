@@ -1,0 +1,29 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks:
+      - arena-public-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./maintenance.html:/srv/maintenance.html:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      PREVIEW_DOMAIN: ${PREVIEW_DOMAIN:-arena.example.test}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@arena.example.test}
+      TG_SPEC_EDGE_UPSTREAM: ${TG_SPEC_EDGE_UPSTREAM:-host.docker.internal:3022}
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  arena-public-network:
+    external: true

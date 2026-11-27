@@ -1,0 +1,1 @@
+ALTER TABLE "Project" ADD COLUMN "showAiDisclaimer" BOOLEAN NOT NULL DEFAULT true;

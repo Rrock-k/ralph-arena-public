@@ -1,0 +1,355 @@
+x-arena-logging: &arena-logging
+  driver: json-file
+  options:
+    max-size: "${ARENA_DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${ARENA_DOCKER_LOG_MAX_FILE:-5}"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *arena-logging
+    environment:
+      POSTGRES_USER: ralph
+      POSTGRES_PASSWORD: ralph
+      POSTGRES_DB: ralph_arena
+    ports:
+      - "${ARENA_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - arena-public-network
+
+  postgres-e2e:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *arena-logging
+    environment:
+      POSTGRES_USER: ralph
+      POSTGRES_PASSWORD: ralph
+      POSTGRES_DB: ralph_arena_e2e
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_e2e:/var/lib/postgresql/data
+    networks:
+      - arena-public-network
+
+  governance-platform:
+    image: "${GOVERNANCE_IMAGE:-arena-public-governance:local}"
+    working_dir: /app
+    restart: unless-stopped
+    logging: *arena-logging
+    depends_on:
+      - postgres
+      - authd
+    environment:
+      NODE_ENV: production
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+      AUTH_TRUST_HOST: "true"
+      NEXTAUTH_URL: "${NEXTAUTH_URL:-http://localhost:3000}"
+      AUTH_URL: "${AUTH_URL:-http://localhost:3000}"
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:-}"
+      AUTH_SECRET: "${AUTH_SECRET:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      ADMIN_EMAILS: "${ADMIN_EMAILS:-}"
+      GOVERNANCE_INTERNAL_URL: "http://governance-platform:3000"
+      GOVERNANCE_PUBLIC_URL: "${GOVERNANCE_PUBLIC_URL:-}"
+      RUNNER_GIT_TRANSPORT: "${RUNNER_GIT_TRANSPORT:-}"
+      RUNNER_AGENT: "${RUNNER_AGENT:-codex}"
+      DEFAULT_PROJECT_BRANCH: "${DEFAULT_PROJECT_BRANCH:-main}"
+      RUNNER_GITHUB_OWNER: "${RUNNER_GITHUB_OWNER:-}"
+      RUNNER_GITHUB_REPO_PREFIX: "${RUNNER_GITHUB_REPO_PREFIX:-arena}"
+      RUNNER_GITHUB_REPO_VISIBILITY: "${RUNNER_GITHUB_REPO_VISIBILITY:-private}"
+      RUNNER_ALLOW_PLACEHOLDER_REPOS: "${RUNNER_ALLOW_PLACEHOLDER_REPOS:-false}"
+      CLAUDE_AUTH_MODE: "${CLAUDE_AUTH_MODE:-oauth}"
+      CODEX_AUTH_MODE: "${CODEX_AUTH_MODE:-subscription}"
+      GOVERNANCE_SCHEDULER_ROLE: "${GOVERNANCE_SCHEDULER_ROLE:-active}"
+      GOVERNANCE_SLOT_ID: "${GOVERNANCE_SLOT_ID:-}"
+      GOVERNANCE_BUILD_ID: "${GOVERNANCE_BUILD_ID:-}"
+      GOVERNANCE_RELEASE_SHA: "${GOVERNANCE_RELEASE_SHA:-}"
+      GOVERNANCE_MIGRATION_STATUS: "${GOVERNANCE_MIGRATION_STATUS:-}"
+      CRON_SECRET: "${CRON_SECRET:-local-cron-secret}"
+      PLAYWRIGHT_TEST: "${PLAYWRIGHT_TEST:-0}"
+      DATABASE_URL: "postgresql://ralph:ralph@postgres:5432/ralph_arena"
+      SECRETS_ENCRYPTION_KEY: "${SECRETS_ENCRYPTION_KEY:-}"
+      RUNNER_WEBHOOK_SECRET: "${RUNNER_WEBHOOK_SECRET:-}"
+      WORKER_SECRET: "${RUNNER_WEBHOOK_SECRET:-}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      ARENA_PUSH_SECRET: "${ARENA_PUSH_SECRET:-}"
+      TG_SPEC_INTERNAL_BASE_URL: "${TG_SPEC_INTERNAL_BASE_URL:-http://host.docker.internal:8787}"
+      WORKER_AGENT_URL: "http://worker-agent:4201"
+      API_PROXY_URL: "http://api-proxy:4100"
+      API_PROXY_SECRET: "${API_PROXY_SECRET:-}"
+      AUTHD_URL: "${AUTHD_URL:-http://authd:4311}"
+      AUTHD_SECRET: "${AUTHD_SECRET:-}"
+      AUTHD_TIMEOUT_MS: "${AUTHD_TIMEOUT_MS:-10000}"
+      TELEGRAM_OIDC_CLIENT_ID: "${TELEGRAM_OIDC_CLIENT_ID:-}"
+      TELEGRAM_OIDC_CLIENT_SECRET: "${TELEGRAM_OIDC_CLIENT_SECRET:-}"
+      TELEGRAM_WEBAPP_BOT_ID: "${TELEGRAM_WEBAPP_BOT_ID:-}"
+      ADMIN_TELEGRAM_USER_IDS: "${ADMIN_TELEGRAM_USER_IDS:-}"
+      ARENA_ADMIN_SECRET: "${ARENA_ADMIN_SECRET:-}"
+      ARENA_PREVIEW_REFRESH_TOKEN: "${ARENA_PREVIEW_REFRESH_TOKEN:-}"
+      ARENA_PREVIEW_REFRESH_PROJECT_IDS: "${ARENA_PREVIEW_REFRESH_PROJECT_IDS:-}"
+      ARENA_PROJECT_WORKSPACES_ROOT: "${ARENA_PROJECT_WORKSPACES_ROOT}"
+      ARENA_PROJECT_ASSETS_ROOT: "${ARENA_PROJECT_ASSETS_ROOT}"
+      ARENA_WORKSPACE_BACKUP_ROOT: "${ARENA_WORKSPACE_BACKUP_ROOT}"
+      ARENA_DB_BACKUP_ROOT: "${ARENA_DB_BACKUP_ROOT}"
+      ARENA_DB_BACKUP_INTERVAL_MS: "${ARENA_DB_BACKUP_INTERVAL_MS:-21600000}"
+      ARENA_DB_BACKUP_INITIAL_DELAY_MS: "${ARENA_DB_BACKUP_INITIAL_DELAY_MS:-300000}"
+      ARENA_DB_BACKUP_KEEP_ALL_HOURS: "${ARENA_DB_BACKUP_KEEP_ALL_HOURS:-48}"
+      ARENA_DB_BACKUP_KEEP_DAILY_DAYS: "${ARENA_DB_BACKUP_KEEP_DAILY_DAYS:-14}"
+      ARENA_DB_BACKUP_KEEP_WEEKLY_WEEKS: "${ARENA_DB_BACKUP_KEEP_WEEKLY_WEEKS:-8}"
+      ARENA_DB_BACKUP_KEEP_MONTHLY_MONTHS: "${ARENA_DB_BACKUP_KEEP_MONTHLY_MONTHS:-6}"
+      HETZNER_API_TOKEN: "${HETZNER_API_TOKEN:-}"
+      HETZNER_DEFAULT_SERVER_TYPE: "${HETZNER_DEFAULT_SERVER_TYPE:-}"
+      HETZNER_DNS_TOKEN: "${HETZNER_DNS_TOKEN:-}"
+      HETZNER_DNS_ZONE_ID: "${HETZNER_DNS_ZONE_ID:-}"
+      PREVIEW_DOMAIN: "${PREVIEW_DOMAIN:-local}"
+      # Auth tokens for container passthrough (claim endpoint)
+      CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+      CLAUDE_CODE_OAUTH_REFRESH_TOKEN: "${CLAUDE_CODE_OAUTH_REFRESH_TOKEN:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      CODEX_AUTH_JSON: "${CODEX_AUTH_JSON:-}"
+      OPENCODE_API_KEY: "${OPENCODE_API_KEY:-}"
+      LANGFUSE_BASE_URL: "${LANGFUSE_BASE_URL:-}"
+      LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
+      LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"
+      FREEMIUS_PRODUCT_ID: "${FREEMIUS_PRODUCT_ID:-}"
+      FREEMIUS_API_KEY: "${FREEMIUS_API_KEY:-}"
+      FREEMIUS_SECRET_KEY: "${FREEMIUS_SECRET_KEY:-}"
+      FREEMIUS_PUBLIC_KEY: "${FREEMIUS_PUBLIC_KEY:-}"
+      FREEMIUS_CHECKOUT_MODE: "${FREEMIUS_CHECKOUT_MODE:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      RESEND_FROM_EMAIL: "${RESEND_FROM_EMAIL:-Arena <noreply@mail.arena.example.test>}"
+      RESEND_WEBHOOK_SECRET: "${RESEND_WEBHOOK_SECRET:-}"
+      NEXT_PUBLIC_CF_BEACON_TOKEN: "${NEXT_PUBLIC_CF_BEACON_TOKEN:-}"
+      APP_PORT: "3000"
+    volumes:
+      - "${ARENA_PROJECT_WORKSPACES_ROOT}:${ARENA_PROJECT_WORKSPACES_ROOT}"
+      - "${ARENA_PROJECT_ASSETS_ROOT}:${ARENA_PROJECT_ASSETS_ROOT}"
+      - "${ARENA_WORKSPACE_BACKUP_ROOT}:${ARENA_WORKSPACE_BACKUP_ROOT}"
+      - "${ARENA_DB_BACKUP_ROOT}:${ARENA_DB_BACKUP_ROOT}"
+    ports:
+      - "${ARENA_GOVERNANCE_PORT:-3000}:3000"
+    networks:
+      - arena-public-network
+
+  authd:
+    build:
+      context: .
+      dockerfile: services/authd/Dockerfile
+    image: arena-public-authd:local
+    restart: unless-stopped
+    logging: *arena-logging
+    environment:
+      NODE_ENV: development
+      AUTHD_PORT: "4311"
+      AUTHD_SECRET: "${AUTHD_SECRET:-}"
+      AUTHD_ANTIGRAVITY_HOME: "/auth/antigravity-home"
+    volumes:
+      - authd_home:/home/node
+      - antigravity_auth_home:/auth/antigravity-home
+    ports:
+      - "4311:4311"
+    networks:
+      - arena-public-network
+
+  governance-tunnel:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:2026.10.3
+    restart: unless-stopped
+    logging: *arena-logging
+    depends_on:
+      - governance-platform
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run", "arena-governance"]
+    volumes:
+      - "./infra/cloudflared/config.local.yml:/etc/cloudflared/config.yml:ro"
+      - "${CLOUDFLARED_CREDENTIALS_FILE}:/etc/cloudflared/credentials.json:ro"
+    networks:
+      - arena-public-network
+
+  verification:
+    image: node:20-slim
+    profiles: ["verification"]
+    working_dir: "${ARENA_HOST_PATH}"
+    mem_limit: 4g
+    volumes:
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+    networks:
+      - arena-public-network
+
+  task-board:
+    image: node:20-slim
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    logging: *arena-logging
+    mem_limit: 1g
+    command: ["sh", "scripts/task-board-local-entrypoint.sh"]
+    volumes:
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+      - task_board_node_modules:${ARENA_HOST_PATH}/apps/task-board/node_modules
+      - task_board_next:${ARENA_HOST_PATH}/apps/task-board/.next
+    ports:
+      - "3001:3001"
+    networks:
+      - arena-public-network
+
+  a2e-studio:
+    build:
+      context: .
+      dockerfile: apps/a2e-studio/Dockerfile.dev
+    image: agents-arena-a2e-studio:local
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    logging: *arena-logging
+    environment:
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    command: >
+      sh -lc "
+        [ -x apps/a2e-studio/node_modules/.bin/next ] || npm --prefix apps/a2e-studio ci;
+        npm --prefix apps/a2e-studio run dev -- --hostname 0.0.0.0 --port 3003
+      "
+    volumes:
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+      - a2e_studio_node_modules:${ARENA_HOST_PATH}/apps/a2e-studio/node_modules
+      - a2e_studio_next:${ARENA_HOST_PATH}/apps/a2e-studio/.next
+    ports:
+      - "${A2E_STUDIO_PORT:-3003}:3003"
+    networks:
+      - arena-public-network
+
+  api-proxy:
+    image: node:20-slim
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    logging: *arena-logging
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgresql://ralph:ralph@postgres:5432/ralph_arena"
+      API_PROXY_PORT: "4100"
+      API_PROXY_SECRET: "${API_PROXY_SECRET:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    command: >
+      sh -lc "
+        [ -x services/api-proxy/node_modules/.bin/tsx ] || npm --prefix services/api-proxy ci;
+        npm --prefix services/api-proxy run start
+      "
+    volumes:
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+      - api_proxy_node_modules:${ARENA_HOST_PATH}/services/api-proxy/node_modules
+    ports:
+      - "4100:4100"
+    networks:
+      - arena-public-network
+
+  # RA-083: Worker Agent — claims runtime intents, docker run, container stop
+  worker-agent:
+    image: node:20-slim
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    logging: *arena-logging
+    depends_on:
+      - governance-platform
+    environment:
+      GOVERNANCE_URL: "http://governance-platform:3000"
+      WORKER_SECRET: "${RUNNER_WEBHOOK_SECRET:-}"
+      HOST_ID: "local"
+      POLL_INTERVAL_MS: "5000"
+      WORKER_PORT: "4201"
+      RUNNER_MAX_CONCURRENT_RUNS: "${LOCAL_RUNNER_MAX_CONCURRENT_RUNS:-32}"
+      WORKER_IMAGE: "${WORKER_IMAGE:-arena-public-worker:local}"
+      ARENA_DEV_MODE: "true"
+      ARENA_HOST_PATH: "${ARENA_HOST_PATH}"
+      ARENA_PROJECT_WORKSPACES_ROOT: "${ARENA_PROJECT_WORKSPACES_ROOT}"
+      ARENA_PROJECT_DATA_ROOT: "${ARENA_PROJECT_DATA_ROOT}"
+      RALEPH_HOST_PATH: "${RALEPH_HOST_PATH:-}"
+      SYMPHO_HOST_PATH: "${SYMPHO_HOST_PATH:-}"
+      ARENA_NETWORK: "arena-public-network"
+      PREVIEW_DOMAIN: "${PREVIEW_DOMAIN:-localhost:8080}"
+      AUTHD_ANTIGRAVITY_DOCKER_VOLUME: "${COMPOSE_PROJECT_NAME:-agents-arena}_antigravity_auth_home"
+      ARENA_DOCKER_LOG_MAX_SIZE: "${ARENA_DOCKER_LOG_MAX_SIZE:-10m}"
+      ARENA_DOCKER_LOG_MAX_FILE: "${ARENA_DOCKER_LOG_MAX_FILE:-5}"
+    command: >
+      sh -lc "
+        [ -x services/worker-agent/node_modules/.bin/tsx ] || npm --prefix services/worker-agent ci;
+        npm --prefix services/worker-agent run start
+      "
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}"
+      - "${ARENA_PROJECT_WORKSPACES_ROOT}:${ARENA_PROJECT_WORKSPACES_ROOT}"
+      - "${ARENA_PROJECT_DATA_ROOT}:${ARENA_PROJECT_DATA_ROOT}"
+      - worker_agent_node_modules:${ARENA_HOST_PATH}/services/worker-agent/node_modules
+    ports:
+      - "4201:4201"
+    networks:
+      - arena-public-network
+
+  arena-bot:
+    profiles: ["automation"]
+    image: node:20-slim
+    working_dir: "${ARENA_HOST_PATH}"
+    restart: unless-stopped
+    logging: *arena-logging
+    environment:
+      ARENA_BOT_WEEKLY_DIGEST_SOURCE_FILE: "/automation/memory.md"
+      ARENA_BOT_DIGEST_SOURCE_FILES: "${ARENA_BOT_DIGEST_SOURCE_FILES:-}"
+      ARENA_BOT_DIGEST_MAX_AGE_HOURS: "${ARENA_BOT_DIGEST_MAX_AGE_HOURS:-}"
+      ARENA_BOT_STATE_FILE: "/state/arena-bot.json"
+      ARENA_BOT_TELEGRAM_TOKEN: "${ARENA_BOT_TELEGRAM_TOKEN:-}"
+      ARENA_BOT_TELEGRAM_CHAT_ID: "${ARENA_BOT_TELEGRAM_CHAT_ID:-}"
+      ARENA_BOT_WEEKLY_DIGEST_POLL_INTERVAL_MS: "${ARENA_BOT_WEEKLY_DIGEST_POLL_INTERVAL_MS:-30000}"
+    command: ["node", "services/arena-bot/src/index.mjs"]
+    volumes:
+      - "${ARENA_HOST_PATH}:${ARENA_HOST_PATH}:ro"
+      - "${ARENA_BOT_AUTOMATIONS_DIR}:/automations:ro"
+      - "${ARENA_BOT_WEEKLY_DIGEST_AUTOMATION_DIR}:/automation:ro"
+      - arena_bot_state:/state
+    networks:
+      - arena-public-network
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *arena-logging
+    depends_on:
+      - governance-platform
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/maintenance.html:/srv/maintenance.html:ro
+      - ./apps/governance-platform/public/short-html:/srv/short-html:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - arena-public-network
+
+volumes:
+  pgdata:
+  pgdata_e2e:
+  authd_home:
+  antigravity_auth_home:
+  task_board_node_modules:
+  task_board_next:
+  a2e_studio_node_modules:
+  a2e_studio_next:
+  api_proxy_node_modules:
+  worker_agent_node_modules:
+  arena_bot_state:
+  caddy_data:
+  caddy_config:
+
+networks:
+  arena-public-network:
+    name: arena-public-network
+    external: true

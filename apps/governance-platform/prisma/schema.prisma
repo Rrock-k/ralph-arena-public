@@ -1,0 +1,960 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  role          String    @default("USER") // "ADMIN" | "USER"
+  accounts      Account[]
+  sessions      Session[]
+  votes         Vote[]
+  proposals     Proposal[]
+  budgetAdjustments  ProjectBudgetAdjustment[]
+  featureFlagUpdates FeatureFlag[] @relation("FeatureFlagUpdatedBy")
+  agentLoops         AgentLoop[]   @relation("AgentLoopOwner")
+  projectEvents      ProjectEvent[]
+  creditBalance      UserCreditBalance?
+  creditPurchases    CreditPurchase[]
+  creditAdjustments  UserCreditAdjustment[]
+  creditAdjustmentsCreated UserCreditAdjustment[] @relation("UserCreditAdjustmentCreatedBy")
+  accessGrantsAsSubject   AccessGrant[]    @relation("AccessGrantSubject")
+  accessGrantsGrantedBy   AccessGrant[]    @relation("AccessGrantGrantedBy")
+  accessAuditActor        AccessAuditLog[] @relation("AccessAuditActor")
+  accessAuditSubject      AccessAuditLog[] @relation("AccessAuditSubject")
+  projectUpdateDeliveryTargetsCreated ProjectUpdateDeliveryTarget[] @relation("ProjectUpdateDeliveryTargetCreatedBy")
+  projectUpdateDeliveryTargetsActivated ProjectUpdateDeliveryTarget[] @relation("ProjectUpdateDeliveryTargetActivatedBy")
+  projectUpdateDeliveryTargetsRevoked ProjectUpdateDeliveryTarget[] @relation("ProjectUpdateDeliveryTargetRevokedBy")
+  projectPersonalNotifications ProjectPersonalNotificationOutbox[] @relation("ProjectPersonalNotificationRecipient")
+  notificationPreferences NotificationPreference[]
+  notificationLogs        NotificationLog[]
+  inAppNotifications      InAppNotification[]
+  providerCredentials     UserProviderCredential[]
+}
+
+model AccessGrant {
+  id              String   @id @default(cuid())
+  subjectUserId   String
+  scopeType       String   // "platform" | "project"
+  scopeId         String?
+  sourcePresetKey String?
+  sourceKind      String   @default("manual")
+  sourceSyncedAt  DateTime?
+  customLabel     String?
+  capabilities    String[]
+  grantedById     String?
+  reason          String?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subjectUser User  @relation("AccessGrantSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+  grantedBy   User? @relation("AccessGrantGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@index([subjectUserId, scopeType, createdAt])
+  @@index([scopeType, scopeId, createdAt])
+  @@index([revokedAt, expiresAt])
+  @@index([grantedById, createdAt])
+}
+
+model AccessAuditLog {
+  id                   String   @id @default(cuid())
+  action               String   // grant_created | grant_updated | grant_revoked | grant_expired
+  actorUserId          String?
+  subjectUserId        String
+  scopeType            String   // "platform" | "project"
+  scopeId              String?
+  sourcePresetKey      String?
+  sourceKind           String   @default("manual")
+  previousCapabilities String[]
+  nextCapabilities     String[]
+  note                 String?
+  createdAt            DateTime @default(now())
+
+  actorUser   User? @relation("AccessAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  subjectUser User  @relation("AccessAuditSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+
+  @@index([subjectUserId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([scopeType, scopeId, createdAt])
+  @@index([action, createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Proposal {
+  id          String    @id @default(cuid())
+  title       String
+  description String
+  spec        String    // Markdown content (initial draft, copied to Spec on launch)
+  status      String    @default("PROPOSED") // PROPOSED | PENDING_REVIEW | APPROVED | REJECTED | WINNER | NOT_SELECTED
+  createdAt   DateTime  @default(now())
+  createdById String?
+  archivedAt  DateTime? // RA-014: soft-delete / archive
+  seasonId    String?
+  creator     User?     @relation(fields: [createdById], references: [id])
+  season      Season?   @relation(fields: [seasonId], references: [id])
+  votes       Vote[]
+  projects    Project[] // RA-141: proposal is optional pre-project artifact; project may outlive it
+
+  @@index([seasonId])
+}
+
+// ADR-008 + RA-141: Project is the root runtime entity.
+// Proposal becomes optional origin metadata instead of required parent relation.
+model Project {
+  id         String    @id @default(cuid())
+  name       String
+  slug       String?   // RA-216: Immutable runtime identity (set on create, never changes on rename)
+  mode       String    @default("community") // "community" | "personal"
+  ownerScopeType String @default("user") // "user" | "organization"
+  ownerScopeId   String?
+  proposalId String?
+  // RA-237: Project has no lifecycle state. Only archived/not.
+  agent          String    @default("codex")
+  agentImpl      String    @default("direct")
+  runnerBackend  String    @default("local") // RA-037: "local" | "vps"
+  model          String?
+  envOverrides   String?
+  requiredSecrets String?  // RA-061: JSON array of {key, description?}
+  claudeAuthMode String?  // RA-053: "oauth" | "api_key"
+  codexAuthMode  String?  // RA-053: "subscription" | "api_key"
+  providerBillingMode String @default("byok") // RA-273: "byok" | "platform_credits" | "platform_credentials"
+  // RA-131: New FK references (nullable during migration)
+  toolId              String?
+  agentLoopVersionId  String?
+  cycleImage     String   @default("arena-public-worker:local")
+  repoUrl      String?
+  repoBranch String    @default("main")
+  archivedAt DateTime?
+  tgSpecSourceProjectId String?   @unique
+  tgSpecMirrorSpecId String?
+  tgSpecLastImportedVersion Int?
+  // RA-098: Runtime fields (formerly on Run)
+  specSnapshot    String?
+  commitSha       String?
+  log             String?
+  progressJson    String?
+  inputTokens      Int?
+  outputTokens     Int?
+  estimatedCostUsd Float?
+  budgetDebitedUsd Float    @default(0)
+  visibility        String    @default("public")  // "featured" | "public" | "private"
+  // When false, the AI-generated content disclaimer interstitial is skipped for
+  // viewers (trusted-team projects). Default true = show the disclaimer.
+  showAiDisclaimer  Boolean   @default(true)
+  exploreRank       Int?
+  isPinned             Boolean   @default(false)
+  galleryFeatured      Boolean   @default(false)
+  galleryFeaturedAt    DateTime?
+  vpsServerType   String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  proposal          Proposal?      @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  tool              Tool?          @relation("ProjectTool", fields: [toolId], references: [id], onDelete: SetNull)
+  agentLoopVersion  AgentLoopVersion? @relation("ProjectAgentLoopVersion", fields: [agentLoopVersionId], references: [id], onDelete: SetNull)
+  components ProjectComponent[]
+  specs    Spec[]
+  assets   ProjectAsset[]
+  releaseArtifacts ProjectReleaseArtifact[]
+  runtimeIntents RuntimeIntent[]
+  budget   ProjectBudget?
+  budgetAdjustments ProjectBudgetAdjustment[]
+  creditAdjustments UserCreditAdjustment[]
+  secrets  ProjectSecret[]
+  vpsHost  VpsHost?
+  runLogs     RunLog[]
+  logArchives LogArchive[]
+  apiUsage ApiUsage[]
+  events   ProjectEvent[]
+  updateOutboxItems ProjectUpdateOutbox[]
+  updateDeliveryTargets ProjectUpdateDeliveryTarget[]
+  personalNotificationOutboxItems ProjectPersonalNotificationOutbox[]
+
+  @@index([proposalId])
+  @@index([mode, createdAt])
+  @@index([exploreRank, createdAt])
+  // RA-237: removed @@index([state, createdAt]) — state field deleted
+  @@index([galleryFeatured, galleryFeaturedAt])
+}
+
+model ProjectComponent {
+  id            String   @id @default(cuid())
+  projectId      String
+  name           String
+  kind           String
+  // RA-237: Simplified state model
+  powerIntent    String   @default("OFF")      // ON | OFF — should container exist?
+  agentIntent    String   @default("ON")       // ON | OFF — should agent loop run?
+  runtimeState   String   @default("ABSENT")    // ABSENT | RUNNING | STOPPED
+  agentState     String?                         // IDLE | RUNNING (legacy reads may still see FAILED during cutover)
+  blockers       String[] @default([])           // ["MANUAL", "BUDGET", "RATE_LIMIT", ...]
+  lastOutcome    String?                         // COMPLETED | FAILED
+  lastOutcomeAt  DateTime?
+  retryAt        DateTime?
+  previewHealth  String   @default("UNKNOWN")    // UNKNOWN | HEALTHY | UNHEALTHY (soft cache, not lifecycle)
+  previewCheckedAt DateTime?
+  // RA-192: Set by provisioner when infra is ready; NULL = needs provisioning, non-NULL = ready for claim
+  provisionedAt  DateTime?
+  // RA-192: Runtime metadata moves to primary component first; legacy Project fields stay during cutover
+  containerName  String?
+  previewUrl     String?
+  workerHost     String?
+  vpsHostId      String?
+  lastHeartbeat  DateTime?
+  retryCount     Int      @default(0)
+  sourceType     String
+  sourceConfig   Json
+  runtimeConfig  Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runtimeIntents RuntimeIntent[]
+
+  @@index([projectId])
+  @@index([projectId, kind])
+  @@index([powerIntent, runtimeState])
+  @@index([powerIntent, agentState])
+  @@index([projectId, powerIntent])
+}
+
+// ADR-008: Spec = versioned requirement document for a Project
+model Spec {
+  id         String   @id @default(cuid())
+  projectId  String
+  title      String?
+  content    String
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions SpecVersion[]
+
+  @@index([projectId, orderIndex])
+}
+
+model SpecVersion {
+  id        String   @id @default(cuid())
+  specId    String
+  version   Int
+  content   String
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  externalSourceSystem    String?
+  externalSourceProjectId String?
+  externalSourceVersion   Int?
+  externalSourceUrl       String?
+  externalAcceptedAt      DateTime?
+  externalMetadataHash    String?
+  acceptedArtifact        Json?
+
+  spec Spec @relation(fields: [specId], references: [id], onDelete: Cascade)
+
+  @@unique([specId, version])
+  @@unique([specId, externalSourceSystem, externalSourceProjectId, externalSourceVersion])
+  @@index([externalSourceSystem, externalSourceProjectId, externalSourceVersion])
+}
+
+// RA-222: ProjectAsset = curated binary input manifest for agents.
+// Bytes live outside Postgres (local filesystem for MVP, later S3/R2).
+model ProjectAsset {
+  id           String    @id @default(cuid())
+  projectId    String
+  path         String    // e.g. "assets/models/dragon.glb" — path in workspace
+  originalName String
+  contentType  String?
+  sizeBytes    Int
+  sha256       String
+  storageKey   String
+  uploadedById String?
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+// RA-365: ProjectReleaseArtifact = downloadable user-facing build output.
+// Bytes live outside Postgres and are not synced into runner workspaces.
+model ProjectReleaseArtifact {
+  id             String   @id @default(cuid())
+  projectId      String
+  platform       String   // "macos"
+  appKind        String   // "electron"
+  status         String   // "building" | "build_failed" | "available"
+  version        String?
+  tag            String?
+  commitSha      String?
+  filename       String?
+  contentType    String?
+  sizeBytes      Int?
+  sha256         String?
+  storageKey     String?
+  builderLabel   String?
+  failureSummary String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, platform, createdAt])
+  @@index([projectId, tag])
+}
+
+// RA-192 Phase 4: worker-facing leases for desired-runtime reconciliation.
+// Governance decides the intent; worker-agent executes Docker and reports completion.
+model RuntimeIntent {
+  id            String    @id @default(cuid())
+  projectId     String
+  componentId   String
+  host          String
+  action        String    // ensure_running | ensure_stopped | ensure_removed
+  runnerMode    String    // preview_only | agent_run
+  state         String    @default("CLAIMED") // CLAIMED | SUCCEEDED | FAILED | ABANDONED
+  attempt       Int       @default(1)
+  lockedUntil   DateTime?
+  error         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  component ProjectComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, state, createdAt])
+  @@index([componentId, state, lockedUntil])
+}
+
+// RA-005: Season — structured cycle of open (submit + vote) and build phases
+model Season {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  status      String    @default("DRAFT") // DRAFT, ACTIVE, COMPLETED, ARCHIVED
+
+  // Phase 1: Open (proposals + voting)
+  submissionStart DateTime?
+
+  // Phase 2: Build (agents build top-N projects)
+  buildStart      DateTime?
+  buildDeadline   DateTime?
+
+  maxWinners  Int       @default(3) // how many proposals advance to build phase
+
+  // RA-005: Open → Build transition
+  requiresModeration  Boolean   @default(false) // if true, proposals need admin approval before becoming winners
+  buildTransitionedAt DateTime? // idempotency guard — set when Open→Build transition is processed
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  proposals    Proposal[]
+  buildConfigs BuildConfig[]
+}
+
+// RA-005: Build configuration — which agent+model combos to run for each winning proposal
+model BuildConfig {
+  id        String   @id @default(cuid())
+  seasonId  String
+  season    Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  agent     String   // "claude-code", "codex"
+  agentImpl String   // "direct", "dummy"
+  model     String?  // "opus", "sonnet", "gpt-5.3-codex", null = agent default
+  order     Int      @default(0) // display order
+  createdAt DateTime @default(now())
+
+  @@index([seasonId])
+}
+
+model Vote {
+  id         String  @id @default(cuid())
+  userId     String
+  proposalId String
+  user       User     @relation(fields: [userId], references: [id])
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, proposalId])
+}
+
+// RA-098: Append-only audit log (replaces Run history)
+model RunLog {
+  id        String   @id @default(cuid())
+  projectId String
+  event     String   // LAUNCHED, PROVISIONING, QUEUED, RUNNING, RESUMED, DEPLOYED, FAILED, CANCELED, etc.
+  detail    String?  // JSON blob: {error, containerName, specSnapshot, inputTokens, outputTokens, costUsd, ...}
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([projectId, createdAt])
+  @@index([event, createdAt])
+}
+
+// RA-108: Snapshot of project log before relaunch (preserves run history)
+model LogArchive {
+  id               String    @id @default(cuid())
+  projectId        String
+  log              String    // full JSONL log of the run
+  agent            String
+  agentImpl        String
+  model            String?
+  terminalState    String    // DEPLOYED, FAILED, CANCELED, AGENT_OFF, ARCHIVED, UNKNOWN
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  inputTokens      Int?
+  outputTokens     Int?
+  estimatedCostUsd Float?
+  createdAt        DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([projectId, createdAt])
+}
+
+// RA-042: Project-level budget (internal credits)
+model ProjectBudget {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  isEnabled       Boolean  @default(false) // if false, project is unlimited
+  totalCreditsUsd Float    @default(0)  // Total credits added by admin
+  usedCreditsUsd  Float    @default(0)  // Total credits consumed by completed runs
+  note            String?               // Admin note on last adjustment
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// RA-045: Audit trail for admin budget adjustments
+model ProjectBudgetAdjustment {
+  id          String   @id @default(cuid())
+  projectId   String
+  createdById String?
+  amountUsd   Float
+  kind        String   // "TOP_UP" | "DEBIT" | "SET_LIMIT"
+  note        String?
+  createdAt   DateTime @default(now())
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+// RA-130: User-level credit balance (purchased via Freemius)
+model UserCreditBalance {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  credits   Float    @default(0) // available credits in USD
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// RA-130: Audit trail for credit purchases via Freemius
+model CreditPurchase {
+  id                String   @id @default(cuid())
+  userId            String
+  planId            String   // Freemius plan ID (45019, 45020, etc.)
+  planTitle         String   // "Starter", "Builder", etc.
+  amountUsd         Float    // purchase price
+  creditsGranted    Float    // credits added to balance
+  freemiusLicenseId String?  @unique
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// RA-273: Audit trail for user credit balance changes outside purchases.
+model UserCreditAdjustment {
+  id          String   @id @default(cuid())
+  userId      String
+  projectId   String?
+  createdById String?
+  amountUsd   Float
+  kind        String   // "PROJECT_BUDGET_RESERVE" | "REFUND" | "ADMIN_CREDIT_GRANT"
+  note        String?
+  createdAt   DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy User?    @relation("UserCreditAdjustmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+// RA-042: Per-request API usage log (written by api-proxy)
+// RA-098: Re-linked to Project (was on Run)
+model ApiUsage {
+  id           String   @id @default(cuid())
+  projectId    String
+  provider     String   // "anthropic" | "openai"
+  model        String?
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// RA-061: Per-project encrypted secrets (injected as env vars into agent containers)
+model ProjectSecret {
+  id             String   @id @default(cuid())
+  projectId      String
+  key            String   // env var name, e.g. "GOOGLE_CLIENT_ID"
+  encryptedValue String   // AES-256-GCM ciphertext (base64)
+  iv             String   // initialization vector (base64)
+  authTag        String   // GCM authentication tag (base64)
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+  @@index([projectId])
+}
+
+// RA-272: User-scoped provider credentials for BYOK agent launches.
+// These are not project/app runtime secrets and must not be exposed through ProjectSecret reveal paths.
+model UserProviderCredential {
+  id               String   @id @default(cuid())
+  userId           String
+  provider         String   // "openai" | "anthropic"
+  encryptedValue   String   // AES-256-GCM ciphertext (base64)
+  iv               String   // initialization vector (base64)
+  authTag          String   // GCM authentication tag (base64)
+  last4            String
+  validationStatus String?
+  validatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([provider])
+}
+
+// RA-037: VPS host provisioned for a project (remote runner backend)
+model VpsHost {
+  id              String    @id @default(cuid())
+  projectId       String?   @unique
+  providerServerId String   // provider-specific server ID (e.g. Hetzner server ID)
+  providerKeyId   String?  // provider-specific SSH key ID (for cleanup)
+  ip              String
+  status          String    @default("PROVISIONING") // PROVISIONING, READY, ERROR, DESTROYING
+  region          String    @default("fsn1")
+  serverType      String    @default("cx23")
+  sshPrivateKey   String   // AES-256-GCM encrypted (base64), same key as ProjectSecret
+  sshPrivateKeyIv String
+  sshPrivateKeyTag String
+  sshPublicKey    String
+  previewDomain   String?  // e.g. "vps-abc123.arena.example.test"
+  errorMessage    String?
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+// RA-131: AgentLoop — execution strategy (direct, ralph, dummy)
+model AgentLoop {
+  id               String   @id @default(cuid())
+  name             String   @unique // "direct", "ralph", "dummy"
+  label            String?  // Human-readable: "Ralph", "Direct", "Dummy"
+  description      String?
+  isActive         Boolean  @default(true)
+  ownerId          String?  // null = system loop; FK → User for user-created
+  visibility       String   @default("public") // "private" | "public"
+  sourceUrl        String?  // git repo (clone at runtime by runner)
+  installCommand   String?  // custom install command (default: npm ci --production)
+  currentVersionId String?  @unique // FK → AgentLoopVersion (latest)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  owner          User?             @relation("AgentLoopOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  currentVersion AgentLoopVersion? @relation("CurrentVersion", fields: [currentVersionId], references: [id])
+  versions       AgentLoopVersion[] @relation("LoopVersions")
+  loopTools      AgentLoopTool[]    @relation("LoopTools")
+}
+
+// RA-131: Versioned configuration for an AgentLoop
+model AgentLoopVersion {
+  id              String   @id @default(cuid())
+  agentLoopId     String
+  version         String   // semver: "1.0.0"
+  commandTemplate String   // "node /arena/cycles/direct.js --agent {agent} ..."
+  capabilities    String[] // ["specs", "community_qa", "messages"]
+  changelog       String?
+  supportTier     String   @default("unsupported") // supported | unsupported
+  complianceStatus String   @default("pending")
+  complianceResult Json?
+  complianceCheckedAt DateTime?
+  createdAt       DateTime @default(now())
+
+  agentLoop       AgentLoop @relation("LoopVersions", fields: [agentLoopId], references: [id], onDelete: Cascade)
+  currentOf       AgentLoop? @relation("CurrentVersion")
+  projects        Project[] @relation("ProjectAgentLoopVersion")
+
+  @@unique([agentLoopId, version])
+  @@index([agentLoopId])
+  @@index([complianceStatus])
+}
+
+// RA-131: Tool — CLI instrument (claude-code, codex)
+model Tool {
+  id             String   @id @default(cuid())
+  name           String   @unique // "claude-code", "codex"
+  label          String?  // Human-readable: "Claude Code", "Codex"
+  description    String?
+  models         String?  // JSON: [{id, label, model, envOverrides?}]
+  defaultModelId String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  projects  Project[]      @relation("ProjectTool")
+  loopTools AgentLoopTool[] @relation("LoopToolTool")
+}
+
+// RA-131: Join table — which tools are available for which loops, with optional model subset
+model AgentLoopTool {
+  id       String  @id @default(cuid())
+  loopId   String
+  toolId   String
+  models   String? // JSON override: subset of tool models for this combo. null = all from tool
+  isDefault Boolean @default(false) // default tool when this loop is selected
+
+  loop AgentLoop @relation("LoopTools", fields: [loopId], references: [id], onDelete: Cascade)
+  tool Tool      @relation("LoopToolTool", fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([loopId, toolId])
+  @@index([loopId])
+}
+
+// RA-089: ProjectEvent — universal agent ↔ human transport
+model ProjectEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  // RA-386: "in" = the runner's inbox, contract types only (WorkspaceEventTypeSchema);
+  // "out" = sent by the agent; "internal" = governance's own record, never polled by the runner.
+  direction String
+  type      String   // "test_request" | "test_result"
+  payload   Json
+  userId    String?
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, direction, type, createdAt])
+  @@index([projectId, createdAt])
+}
+
+// RA-279: Arena-owned Telegram delivery targets for manager-only project updates.
+// This is target eligibility truth only; project permissions stay in AccessGrant.
+model ProjectUpdateDeliveryTarget {
+  id                 String    @id @default(cuid())
+  projectId          String
+  sourceSystem       String
+  sourceTargetId     String
+  targetKind         String    @default("telegram_chat_topic")
+  audience           String
+  requiredCapability String?
+  status             String    @default("ACTIVE") // ACTIVE | PAUSED | REVOKED
+  label              String?
+  createdByUserId    String?
+  activatedByUserId  String?
+  revokedByUserId    String?
+  activatedAt        DateTime  @default(now())
+  revokedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User?   @relation("ProjectUpdateDeliveryTargetCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  activatedBy User?   @relation("ProjectUpdateDeliveryTargetActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
+  revokedBy   User?   @relation("ProjectUpdateDeliveryTargetRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, sourceSystem, sourceTargetId, audience])
+  @@index([projectId, audience, status])
+  @@index([sourceSystem, sourceTargetId])
+  @@index([status, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([activatedByUserId, activatedAt])
+  @@index([revokedByUserId, revokedAt])
+}
+
+// RA-278: Arena-owned safe project updates for Telegram delivery.
+// This is delivery/retry truth only; runtime/spec/secret truth stays in canonical tables.
+model ProjectUpdateOutbox {
+  id                 String    @id @default(cuid())
+  projectId          String
+  eventType          String
+  audience           String
+  requiredCapability String?
+  dedupeKey          String
+  payload            Json
+  status             String    @default("PENDING") // PENDING | DELIVERING | DELIVERED | FAILED | SKIPPED
+  attempts           Int       @default(0)
+  lockedBy           String?
+  leaseId            String?
+  lockedUntil        DateTime?
+  nextAttemptAt      DateTime?
+  deliveredAt        DateTime?
+  externalMessageId  String?
+  lastError          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, dedupeKey])
+  @@index([projectId, status, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([audience, status, createdAt])
+  @@index([leaseId])
+}
+
+// RA-284: Arena-owned private Telegram notification outbox.
+// This is per-recipient delivery/retry truth; access and preferences are rechecked before claim.
+model ProjectPersonalNotificationOutbox {
+  id                 String    @id @default(cuid())
+  projectId          String
+  recipientUserId    String
+  channel            String    @default("telegram_private")
+  telegramUserId     String
+  eventType          String
+  requiredCapability String
+  dedupeKey          String
+  payload            Json
+  status             String    @default("PENDING") // PENDING | DELIVERING | DELIVERED | FAILED | SKIPPED
+  attempts           Int       @default(0)
+  lockedBy           String?
+  leaseId            String?
+  lockedUntil        DateTime?
+  nextAttemptAt      DateTime?
+  deliveredAt        DateTime?
+  externalMessageId  String?
+  lastError          String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  recipient User    @relation("ProjectPersonalNotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, recipientUserId, channel, dedupeKey])
+  @@index([recipientUserId, status, createdAt])
+  @@index([projectId, status, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([leaseId])
+}
+
+// RA-047: Feature flags configurable from admin panel
+model CronJob {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. "qa-feedback", "provisioner", "reaper"
+  description String?
+  endpoint    String   // e.g. "/api/cron/qa-feedback"
+  intervalMin Int      // interval in minutes
+  enabled     Boolean  @default(true)
+  lastRunAt   DateTime?
+  lastResult  String?  // JSON string with last run result
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+model MaintenanceItem {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  kind           String   // cron | maintenance | codex_automation
+  name           String
+  description    String?
+  owner          String   // arena_code | arena_db | external_codex | manual
+  scheduleOwner  String   // code | db | external | disabled | manual
+  schedule       String?
+  enabled        Boolean  @default(true)
+  allowRunNow    Boolean  @default(false)
+  executorType   String   // http_cron | fixed_db_backup | codex_automation
+  executorKey    String
+  executorConfig Json
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  runs MaintenanceRun[]
+
+  @@index([kind, enabled])
+  @@index([executorType, executorKey])
+}
+
+model MaintenanceRun {
+  id         String    @id @default(cuid())
+  itemId     String
+  trigger    String    // manual | schedule | system
+  actorType  String    @default("system") // user | system | cron
+  actorId    String?
+  actorCapability String?
+  status     String    @default("STARTED") // STARTED | SUCCEEDED | FAILED
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+  summary    String?
+  result     Json?
+  error      Json?
+
+  item MaintenanceItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId, startedAt])
+  @@index([status, startedAt])
+}
+
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation("FeatureFlagUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedAt])
+}
+
+// RA-224: Per-user opt-out preferences for notification events × channels
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  eventType String   // "project.deployed" | "project.failed" | "project.paused_budget" | "proposal.approved"
+  channel   String   @default("email") // "email" | "in_app" | project-scoped channels such as "telegram_private"
+  scopeType String   @default("global") // "global" | "project"
+  scopeId   String   @default("global") // "global" or project id
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventType, channel, scopeType, scopeId])
+  @@index([userId])
+  @@index([scopeType, scopeId])
+}
+
+// RA-224: Audit log of every notification dispatch attempt
+model NotificationLog {
+  id             String   @id @default(cuid())
+  userId         String?  // null for anonymous (newsletter)
+  eventType      String   // "project.deployed" | "project.failed" | etc.
+  channel        String   // "email"
+  recipientEmail String   // delivery target
+  status         String   // "SENT" | "DELIVERED" | "OPENED" | "CLICKED" | "BOUNCED" | "COMPLAINED" | "FAILED" | "SKIPPED"
+  resendEmailId  String?  // Resend message ID (for webhook correlation)
+  error          String?  // error message on FAILED
+  projectId      String?  // optional FK for context
+  metadata       String?  // JSON: {subject, templateKey, ...}
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([resendEmailId])
+  @@index([eventType, createdAt])
+}
+
+// RA-224: Newsletter / updates mailing list subscribers (landing page + platform)
+model NewsletterSubscriber {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  source        String    @default("landing") // "landing" | "platform" | "admin"
+  status        String    @default("ACTIVE")  // "ACTIVE" | "UNSUBSCRIBED" | "BOUNCED" | "COMPLAINED"
+  unsubscribeToken String @unique @default(cuid()) // for one-click unsubscribe
+  confirmedAt   DateTime? // double opt-in confirmation
+  unsubscribedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([email])
+}
+
+// RA-225: In-app notifications — bell icon, read/unread, dismissable
+model InAppNotification {
+  id        String   @id @default(cuid())
+  userId    String
+  eventType String   // "project.deployed" | "project.failed" | etc.
+  title     String
+  body      String
+  link      String?  // URL to navigate to on click
+  read      Boolean  @default(false)
+  projectId String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@index([userId, createdAt])
+}
